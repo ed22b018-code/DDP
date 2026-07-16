@@ -1,0 +1,21 @@
+/* Tailwind's three layers get injected here. */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Base page styling: dark plane, system sans font (per the data-viz spec). */
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background-color: #0d0d0d;
+  color: #ffffff;
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+/* Large standalone numbers use proportional figures by default; tabular where
+   we need vertical alignment (handled inline where needed). */

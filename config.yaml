@@ -1,0 +1,150 @@
+# =============================================================================
+# config.yaml  --  THE SINGLE CONTROL PANEL FOR THE WHOLE SYSTEM
+# =============================================================================
+# This is the ONLY place you should need to edit to change how the system
+# behaves. The Python code reads values from here instead of hard-coding them.
+#
+# Beginner tip: YAML is just "key: value". Indentation (spaces, NOT tabs)
+# creates nested groups. Lines starting with '#' are comments and are ignored.
+# =============================================================================
+
+
+# -----------------------------------------------------------------------------
+# 1) BATTERY DEFAULTS
+# -----------------------------------------------------------------------------
+# These describe a typical battery. The dashboard "setup form" can override
+# them per session, but these are the sensible fallbacks so nothing ever
+# crashes if a value is missing.
+battery:
+  chemistry: "Li-ion NMC"      # just a label shown in the UI
+  nominal_capacity_ah: 3.0     # Ah = amp-hours. Roughly "how much charge it holds".
+  nominal_voltage_v: 3.7       # the battery's rated/average voltage
+  max_voltage_v: 4.2           # fully-charged voltage limit (do not exceed)
+  min_voltage_v: 3.0           # fully-empty voltage limit (do not go below)
+  max_safe_temp_c: 45.0        # above this the battery degrades / is unsafe
+  cell_count: 1                # number of cells in series
+  current_cycle_count: 300     # how many charge/discharge cycles it has lived
+
+
+# -----------------------------------------------------------------------------
+# 2) PREDICTION SETTINGS
+# -----------------------------------------------------------------------------
+# WHAT WE PREDICT.
+#   SoH  = State of Health: current battery "health" as a % of a new battery
+#          (100% = brand new, lower = more worn out).
+#   RUL  = Remaining Useful Life: how many cycles until the battery is
+#          considered end-of-life.
+#   SoC  = State of Charge: how "full" the battery is right now (like a fuel
+#          gauge, 0-100%). (SoC is computed live, not by the ML model.)
+#
+# 'target' picks what the ML model learns to predict.
+#   - "soh_future"  -> SoH after `horizon_cycles` more cycles (default)
+#   - "rul"         -> Remaining Useful Life in cycles
+# Switch the whole system between SoH-prediction and RUL-prediction by
+# changing ONLY this one value (and retraining with `python ml/train.py`).
+prediction:
+  target: "soh_future"         # "soh_future" or "rul"
+  horizon_cycles: 50           # predict SoH this many cycles into the future
+  soh_end_of_life_pct: 80.0    # SoH at/below which battery is "end of life"
+
+
+# -----------------------------------------------------------------------------
+# 3) FEATURES
+# -----------------------------------------------------------------------------
+# The list of input columns the ML model is allowed to use. To add/remove a
+# feature later, just edit this list (and make sure features.py can build it).
+# Every name here must exist after ml/features.py runs.
+features:
+  active:
+    - cycle_index              # how many cycles so far
+    - discharge_time_s         # time to discharge (seconds)
+    - time_at_415v_s           # time spent near 4.15V during charge
+    - time_constant_current_s  # time in constant-current charging phase
+    - decrement_36_34v         # voltage decrement in the 3.6V->3.4V region
+    - max_voltage_discharge    # max voltage seen during discharge
+    - min_voltage_charge       # min voltage seen during charge
+    - charging_time_s          # total charging time (seconds)
+    # --- V/I/T-derived engineered features (built in features.py) ---
+    - c_rate                   # current / nominal_capacity (charge/discharge speed)
+    - temp_stress              # how far temperature is into the unsafe band
+    - voltage_headroom         # how much voltage room is left to the max limit
+
+
+# -----------------------------------------------------------------------------
+# 4) MODEL CHOICE + FIXED PARAMETERS
+# -----------------------------------------------------------------------------
+# Choose the algorithm here. No hyperparameter search is done (kept light on
+# purpose); these are sensible fixed values you can tweak by hand later.
+model:
+  type: "xgboost"              # "xgboost" or "random_forest"
+  random_state: 42            # fixes randomness so results are reproducible
+  test_size: 0.2              # fraction of data held out to test the model (20%)
+
+  xgboost:
+    n_estimators: 200
+    max_depth: 4
+    learning_rate: 0.08
+    subsample: 0.9
+    colsample_bytree: 0.9
+
+  random_forest:
+    n_estimators: 250
+    max_depth: 8
+    min_samples_leaf: 2
+
+
+# -----------------------------------------------------------------------------
+# 5) RECOMMENDATION RULE THRESHOLDS
+# -----------------------------------------------------------------------------
+# The deterministic rule engine (rules.py) compares live readings to these
+# numbers to raise info/warning/critical flags. Tune sensitivity here.
+thresholds:
+  temp_warning_c: 40.0         # start warning above this temperature
+  temp_critical_c: 45.0        # critical above this temperature
+  temp_rise_rate_c_per_s: 0.5  # "rapid" temperature rise (deg C per second)
+
+  c_rate_warning: 1.5          # warn above this discharge/charge speed
+  c_rate_critical: 2.5         # critical above this speed
+
+  voltage_high_margin_v: 0.05  # "near max" if within this many volts of max
+  voltage_low_margin_v: 0.05   # "near min" if within this many volts of min
+
+  soc_low_warning_pct: 20.0    # warn when charge gets low
+  stress_score_warning: 50.0   # combined stress score warning level (0-100)
+  stress_score_critical: 75.0  # combined stress score critical level (0-100)
+
+
+# -----------------------------------------------------------------------------
+# 6) LIVE STREAM / SIMULATOR SETTINGS
+# -----------------------------------------------------------------------------
+stream:
+  sample_rate_hz: 2.0          # how many samples per second to stream
+  history_length: 120          # how many recent samples the UI keeps on screen
+  default_scenario: "normal_drive"
+  soh_refresh_every_n_samples: 10   # recompute the ML SoH estimate this often
+  genai_min_seconds_between_calls: 8.0  # don't spam the LLM; throttle calls
+
+
+# -----------------------------------------------------------------------------
+# 7) GEN-AI (LLM) SETTINGS
+# -----------------------------------------------------------------------------
+# The API key is read from the ANTHROPIC_API_KEY environment variable, NOT
+# from this file (never put secrets in config). If the key is missing, the
+# system automatically falls back to plain rule-based recommendation text.
+genai:
+  enabled: true                # set false to always use rule-based text
+  model: "claude-sonnet-4-6"   # Anthropic model string
+  max_tokens: 300
+  temperature: 0.4
+
+
+# -----------------------------------------------------------------------------
+# 8) FILE PATHS
+# -----------------------------------------------------------------------------
+paths:
+  artifacts_dir: "ml/artifacts"
+  model_file: "model.joblib"
+  scaler_file: "scaler.joblib"
+  explainer_file: "explainer.joblib"
+  feature_names_file: "feature_names.joblib"
+  eval_plot_file: "ml/artifacts/actual_vs_predicted.png"
